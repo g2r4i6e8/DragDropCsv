@@ -22,16 +22,19 @@ class DragDropCsv(QObject):
         self.canvas = iface.mapCanvas()
         self.project = QgsProject.instance()
         self.layer_tree_view = iface.layerTreeView()
+        self.main_window = iface.mainWindow()
         self.temp_files = []  # Keep track of temporary files
         self.settings = QSettings()
         
     def initGui(self):
         """Add the drag and drop handler when plugin is enabled"""
         self.layer_tree_view.viewport().installEventFilter(self)
+        self.main_window.installEventFilter(self)
         
     def unload(self):
         """Remove event filter when plugin is disabled"""
         self.layer_tree_view.viewport().removeEventFilter(self)
+        self.main_window.removeEventFilter(self)
         # Clean up any remaining temporary files
         self.cleanup_temp_files()
         
@@ -60,8 +63,39 @@ class DragDropCsv(QObject):
     def eventFilter(self, obj, event):
         """Handle drag and drop events"""
         if event.type() == event.Drop:
-            return self.handle_drop_event(event)
+            # Check if the drop is on the main window or layer tree view
+            if obj == self.main_window:
+                return self.handle_main_window_drop(event)
+            elif obj == self.layer_tree_view.viewport():
+                return self.handle_drop_event(event)
         return super().eventFilter(obj, event)
+        
+    def handle_main_window_drop(self, event):
+        """Process drop events for the main QGIS window"""
+        mime_data = event.mimeData()
+        
+        if mime_data.hasUrls():
+            for url in mime_data.urls():
+                file_path = url.toLocalFile()
+                if file_path and (file_path.lower().endswith('.csv.gz') or file_path.lower().endswith('.csv')):
+                    try:
+                        print(f"Processing file dropped on main window: {file_path}")
+                        if file_path.lower().endswith('.csv.gz'):
+                            self.process_gzipped_csv(file_path)
+                        else:
+                            self.process_csv(file_path)
+                        event.accept()
+                        return True
+                    except Exception as e:
+                        print(f"Error processing file {file_path}: {str(e)}")
+                        QMessageBox.warning(
+                            self.iface.mainWindow(),
+                            "Error loading CSV",
+                            f"Could not load {file_path}: {str(e)}"
+                        )
+                        event.ignore()
+                        return False
+        return False
         
     def handle_drop_event(self, event):
         """Process drop events for .csv.gz and .csv files"""
