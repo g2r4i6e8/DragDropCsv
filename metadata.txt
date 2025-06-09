@@ -1,0 +1,14 @@
+[general]
+name=Drag and Drop CSV
+qgisMinimumVersion=3.0
+description=Allows drag and drop of .csv and .csv.gz files into QGIS with instant editing
+version=1.0
+author=Andrey Kolomatskiy
+email=kolomatsky.andrew@gmail.com
+homepage=https://github.com/g2r4i6e8/DragDropCsv
+tracker=https://github.com/g2r4i6e8/DragDropCsv/issues
+repository=https://github.com/g2r4i6e8/DragDropCsv
+category=Vector
+icon=icon.png
+tags=csv, drag and drop, import, gzip
+about=This plugin allows users to drag and drop CSV and compressed CSV files (.csv.gz) directly into QGIS. The CSV file opens as temporary editable vector layer. 
