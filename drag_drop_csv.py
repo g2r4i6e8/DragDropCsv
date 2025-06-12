@@ -5,7 +5,7 @@ import csv
 import re
 import time
 import json
-from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings
+from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings, QVariant
 from qgis.PyQt.QtWidgets import QMessageBox, QCheckBox
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsWkbTypes, QgsCoordinateReferenceSystem,
@@ -252,6 +252,88 @@ class DragDropCsv(QObject):
         
         return memory_layer
 
+    def process_wkt_geometries(self, file_path, delimiter, encoding, wkt_col, crs, base_layer_name):
+        """Process WKT geometries and create separate layers for each geometry type"""
+        print("Processing WKT geometries...")
+        
+        # Dictionary to store features by geometry type
+        geometry_features = {}
+        
+        # Read the CSV file
+        with open(file_path, 'r', encoding=encoding) as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            
+            # Get field names excluding the WKT column
+            field_names = [f for f in reader.fieldnames if f != wkt_col]
+            
+            for row in reader:
+                wkt = row[wkt_col]
+                if not wkt:
+                    continue
+                    
+                # Create feature without geometry first
+                feature = QgsFeature()
+                
+                # Add attributes
+                attrs = [row[f] for f in field_names]
+                feature.setAttributes(attrs)
+                
+                # Try to create geometry from WKT
+                try:
+                    geometry = QgsGeometry.fromWkt(wkt)
+                    if not geometry.isNull():
+                        feature.setGeometry(geometry)
+                        
+                        # Get geometry type
+                        geom_type = geometry.type()
+                        type_name = QgsWkbTypes.geometryDisplayString(geom_type)
+                        
+                        # Add feature to appropriate geometry type list
+                        if type_name not in geometry_features:
+                            geometry_features[type_name] = []
+                        geometry_features[type_name].append(feature)
+                except Exception as e:
+                    print(f"Error processing WKT: {wkt}, Error: {str(e)}")
+                    continue
+        
+        # Create layers for each geometry type
+        created_layers = []
+        for geom_type, features in geometry_features.items():
+            if not features:
+                continue
+                
+            # Create layer name with geometry type suffix
+            layer_name = f"{base_layer_name}_{geom_type}"
+            
+            # Create memory layer
+            memory_layer = QgsVectorLayer(
+                f"{geom_type}?crs={crs}",
+                layer_name,
+                "memory"
+            )
+            
+            if not memory_layer.isValid():
+                print(f"Failed to create layer for {geom_type}")
+                continue
+            
+            # Add fields
+            fields = QgsFields()
+            for field_name in field_names:
+                fields.append(QgsField(field_name, QVariant.String))
+            memory_layer.dataProvider().addAttributes(fields)
+            memory_layer.updateFields()
+            
+            # Add features
+            memory_layer.dataProvider().addFeatures(features)
+            
+            # Add layer to project
+            self.project.addMapLayer(memory_layer)
+            created_layers.append(memory_layer)
+            
+            print(f"Created layer {layer_name} with {len(features)} features")
+        
+        return created_layers
+
     def process_csv(self, file_path):
         """Process a regular CSV file"""
         print(f"Starting to process CSV file: {file_path}")
@@ -318,49 +400,80 @@ class DragDropCsv(QObject):
             # Create layer name from filename
             layer_name = os.path.splitext(os.path.basename(file_path))[0]
             
-            # Create URI with proper path handling
-            uri = self.create_layer_uri(
-                file_path,
-                delimiter,
-                encoding,
-                geometry_type,
-                x_col=dialog.get_x_column() if "X/Y columns" in geometry_type else None,
-                y_col=dialog.get_y_column() if "X/Y columns" in geometry_type else None,
-                wkt_col=dialog.get_wkt_column() if "WKT" in geometry_type else None,
-                crs=crs
-            )
-            
-            # Create the source vector layer
-            print("Creating source vector layer...")
-            source_layer = QgsVectorLayer(uri, layer_name, "delimitedtext")
-            
-            if not source_layer.isValid():
-                raise Exception(f"Failed to create valid layer from CSV: {source_layer.error().message()}")
-            print("Source layer created successfully")
-            
-            # Create editable memory layer
-            memory_layer = self.create_editable_layer(source_layer, layer_name)
-            
-            # Add layer to project
-            print("Adding layer to project...")
-            self.project.addMapLayer(memory_layer)
-            
-            # Zoom to layer extent if it has geometry
-            if memory_layer.wkbType() != QgsWkbTypes.NoGeometry:
-                print("Zooming to layer extent...")
-                # Get the layer's extent in its source CRS
-                layer_extent = memory_layer.extent()
-                # Transform the extent to the canvas CRS
-                canvas_crs = self.canvas.mapSettings().destinationCrs()
-                if canvas_crs != memory_layer.crs():
-                    transform = QgsCoordinateTransform(memory_layer.crs(), canvas_crs, self.project)
-                    layer_extent = transform.transformBoundingBox(layer_extent)
-                # Set the canvas extent
-                self.canvas.setExtent(layer_extent)
-                self.canvas.refresh()
+            if "WKT" in geometry_type:
+                # Process WKT geometries and create separate layers
+                created_layers = self.process_wkt_geometries(
+                    file_path,
+                    delimiter,
+                    encoding,
+                    dialog.get_wkt_column(),
+                    crs,
+                    layer_name
+                )
+                
+                if created_layers:
+                    # Zoom to the extent of all created layers
+                    combined_extent = None
+                    for layer in created_layers:
+                        if layer.wkbType() != QgsWkbTypes.NoGeometry:
+                            if combined_extent is None:
+                                combined_extent = layer.extent()
+                            else:
+                                combined_extent.combineExtentWith(layer.extent())
+                    
+                    if combined_extent:
+                        # Transform the extent to the canvas CRS
+                        canvas_crs = self.canvas.mapSettings().destinationCrs()
+                        if canvas_crs != created_layers[0].crs():
+                            transform = QgsCoordinateTransform(created_layers[0].crs(), canvas_crs, self.project)
+                            combined_extent = transform.transformBoundingBox(combined_extent)
+                        # Set the canvas extent
+                        self.canvas.setExtent(combined_extent)
+                        self.canvas.refresh()
+            else:
+                # Create URI with proper path handling
+                uri = self.create_layer_uri(
+                    file_path,
+                    delimiter,
+                    encoding,
+                    geometry_type,
+                    x_col=dialog.get_x_column() if "X/Y columns" in geometry_type else None,
+                    y_col=dialog.get_y_column() if "X/Y columns" in geometry_type else None,
+                    wkt_col=dialog.get_wkt_column() if "WKT" in geometry_type else None,
+                    crs=crs
+                )
+                
+                # Create the source vector layer
+                print("Creating source vector layer...")
+                source_layer = QgsVectorLayer(uri, layer_name, "delimitedtext")
+                
+                if not source_layer.isValid():
+                    raise Exception(f"Failed to create valid layer from CSV: {source_layer.error().message()}")
+                print("Source layer created successfully")
+                
+                # Create editable memory layer
+                memory_layer = self.create_editable_layer(source_layer, layer_name)
+                
+                # Add layer to project
+                print("Adding layer to project...")
+                self.project.addMapLayer(memory_layer)
+                
+                # Zoom to layer extent if it has geometry
+                if memory_layer.wkbType() != QgsWkbTypes.NoGeometry:
+                    print("Zooming to layer extent...")
+                    # Get the layer's extent in its source CRS
+                    layer_extent = memory_layer.extent()
+                    # Transform the extent to the canvas CRS
+                    canvas_crs = self.canvas.mapSettings().destinationCrs()
+                    if canvas_crs != memory_layer.crs():
+                        transform = QgsCoordinateTransform(memory_layer.crs(), canvas_crs, self.project)
+                        layer_extent = transform.transformBoundingBox(layer_extent)
+                    # Set the canvas extent
+                    self.canvas.setExtent(layer_extent)
+                    self.canvas.refresh()
             
             print("File processing completed successfully")
-            self.iface.mainWindow().statusBar().showMessage("Layer loaded successfully", 3000)
+            self.iface.mainWindow().statusBar().showMessage("Layer(s) loaded successfully", 3000)
             
         except Exception as e:
             print(f"Error during processing: {str(e)}")
