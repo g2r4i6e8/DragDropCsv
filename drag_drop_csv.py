@@ -9,7 +9,7 @@ from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings
 from qgis.PyQt.QtWidgets import QMessageBox, QCheckBox
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsWkbTypes, QgsCoordinateReferenceSystem,
-    QgsFeature, QgsField, QgsFields, QgsGeometry
+    QgsFeature, QgsField, QgsFields, QgsGeometry, QgsCoordinateTransform
 )
 from qgis.gui import QgsLayerTreeView
 from .csv_settings_dialog import CsvSettingsDialog
@@ -349,7 +349,15 @@ class DragDropCsv(QObject):
             # Zoom to layer extent if it has geometry
             if memory_layer.wkbType() != QgsWkbTypes.NoGeometry:
                 print("Zooming to layer extent...")
-                self.canvas.setExtent(memory_layer.extent())
+                # Get the layer's extent in its source CRS
+                layer_extent = memory_layer.extent()
+                # Transform the extent to the canvas CRS
+                canvas_crs = self.canvas.mapSettings().destinationCrs()
+                if canvas_crs != memory_layer.crs():
+                    transform = QgsCoordinateTransform(memory_layer.crs(), canvas_crs, self.project)
+                    layer_extent = transform.transformBoundingBox(layer_extent)
+                # Set the canvas extent
+                self.canvas.setExtent(layer_extent)
                 self.canvas.refresh()
             
             print("File processing completed successfully")
