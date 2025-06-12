@@ -30,7 +30,7 @@ class CsvSettingsDialog(QDialog):
         self.geometry_combo = QComboBox()
         self.geometry_combo.addItems([
             "No geometry", 
-            "WKT", 
+            "WKT Geometry", 
             "Point (X/Y columns)"
         ])
         self.geometry_combo.setCurrentIndex(0)
@@ -171,7 +171,7 @@ class CsvSettingsDialog(QDialog):
         if wkt_cols:
             # Prefer WKT if available
             for i in range(self.geometry_combo.count()):
-                if "WKT" in self.geometry_combo.itemText(i):
+                if "WKT Geometry" in self.geometry_combo.itemText(i):
                     self.geometry_combo.setCurrentIndex(i)
                     self.wkt_column_combo.setCurrentText(wkt_cols[0])
                     break

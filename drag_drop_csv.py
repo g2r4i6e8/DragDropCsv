@@ -302,8 +302,8 @@ class DragDropCsv(QObject):
             if not features:
                 continue
                 
-            # Create layer name with geometry type suffix
-            layer_name = f"{base_layer_name}_{geom_type}"
+            # Create layer name - only add geometry type suffix if there are multiple types
+            layer_name = base_layer_name if len(geometry_features) == 1 else f"{base_layer_name}_{geom_type}"
             
             # Create memory layer
             memory_layer = QgsVectorLayer(
@@ -366,7 +366,9 @@ class DragDropCsv(QObject):
             if last_settings:
                 dialog.delimiter_combo.setCurrentText(last_settings.get('delimiter', 'Comma (,)'))
                 dialog.encoding_combo.setCurrentText(last_settings.get('encoding', 'UTF-8'))
-                dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
+                # Don't override geometry type if it was auto-detected
+                if not any(x in dialog.geometry_combo.currentText().lower() for x in ['wkt', 'x/y']):
+                    dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
                 if last_settings.get('crs') == 'EPSG:4326':
                     dialog.crs_4326_radio.setChecked(True)
                 else:
