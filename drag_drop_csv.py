@@ -14,6 +14,7 @@ from qgis.core import (
 )
 from qgis.gui import QgsLayerTreeView
 from .csv_settings_dialog import CsvSettingsDialog
+from urllib.parse import quote
 
 
 class DragDropCsv(QObject):
@@ -221,8 +222,16 @@ class DragDropCsv(QObject):
         if not file_path.startswith('/'):
             file_path = '/' + file_path
             
-        # Build base URI
-        uri = f"file://{file_path}?delimiter={delimiter}&encoding={encoding}&detectTypes=yes"
+        # Handle special delimiters
+        if delimiter == '\t':
+            delimiter_str = '\\t'
+        elif delimiter == ' ':
+            delimiter_str = '\\s'
+        else:
+            delimiter_str = delimiter
+            
+        # Build base URI with QGIS-specific format
+        uri = f"file://{file_path}?type=csv&delimiter={delimiter_str}&encoding={encoding}&detectTypes=yes"
         
         # Add geometry settings
         if geometry_type == "No geometry":
@@ -372,18 +381,33 @@ class DragDropCsv(QObject):
             # Detect encoding
             encoding = self.detect_encoding(file_path)
             
-            # Read the CSV to get column names
-            print("Reading CSV headers...")
-            with open(file_path, 'r', encoding=encoding) as f:
-                reader = csv.reader(f)
-                try:
-                    columns = next(reader)
-                except StopIteration:
-                    raise Exception("File is empty")
-            
             # Show settings dialog
             print("Opening settings dialog...")
             dialog = CsvSettingsDialog(self.iface.mainWindow())
+            
+            # Load previous settings if available
+            last_settings = self.load_settings()
+            if last_settings:
+                # Set delimiter first
+                dialog.delimiter_combo.setCurrentText(last_settings.get('delimiter', 'Comma (,)'))
+                # Parse columns with the saved delimiter
+                delimiter = dialog.get_delimiter()
+                with open(file_path, 'r', encoding=encoding) as f:
+                    reader = csv.reader(f, delimiter=delimiter)
+                    try:
+                        columns = next(reader)
+                    except StopIteration:
+                        raise Exception("File is empty")
+            else:
+                # Use default comma delimiter for initial parsing
+                with open(file_path, 'r', encoding=encoding) as f:
+                    reader = csv.reader(f)
+                    try:
+                        columns = next(reader)
+                    except StopIteration:
+                        raise Exception("File is empty")
+            
+            # Set columns in dialog
             dialog.set_columns(columns)
             
             # Convert encoding name to match dialog options
@@ -406,10 +430,7 @@ class DragDropCsv(QObject):
             # Load previous settings if available
             last_settings = self.load_settings()
             if last_settings:
-                dialog.delimiter_combo.setCurrentText(last_settings.get('delimiter', 'Comma (,)'))
-                # Don't override detected encoding
-                if not any(x in dialog.geometry_combo.currentText().lower() for x in ['wkt', 'x/y']):
-                    dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
+                dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
                 if last_settings.get('crs') == 'EPSG:4326':
                     dialog.crs_4326_radio.setChecked(True)
                 else:
@@ -431,6 +452,14 @@ class DragDropCsv(QObject):
             # Save settings if requested
             if remember_settings.isChecked():
                 self.save_settings(settings)
+            else:
+                default_settings = {
+                    'delimiter': 'Comma (,)',
+                    'encoding': 'UTF-8',
+                    'geometry_type': 'X/Y columns',
+                    'crs': 'EPSG:4326'
+                }
+                self.save_settings(default_settings)
             
             delimiter = dialog.get_delimiter()
             geometry_type = dialog.get_geometry_type()
