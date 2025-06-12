@@ -225,8 +225,6 @@ class DragDropCsv(QObject):
         # Handle special delimiters
         if delimiter == '\t':
             delimiter_str = '\\t'
-        elif delimiter == ' ':
-            delimiter_str = '\\s'
         else:
             delimiter_str = delimiter
             
@@ -344,9 +342,21 @@ class DragDropCsv(QObject):
             # Create layer name - only add geometry type suffix if there are multiple types
             layer_name = base_layer_name if len(geometry_features) == 1 else f"{base_layer_name}_{geom_type}"
             
+            # Map geometry type to QGIS-compatible string
+            geom_type_map = {
+                'Point': 'Point',
+                'Line': 'LineString',
+                'LineString': 'LineString',
+                'Polygon': 'Polygon',
+                'MultiPoint': 'MultiPoint',
+                'MultiLineString': 'MultiLineString',
+                'MultiPolygon': 'MultiPolygon'
+            }
+            qgis_geom_type = geom_type_map.get(geom_type, geom_type)
+            
             # Create memory layer
             memory_layer = QgsVectorLayer(
-                f"{geom_type}?crs={crs}",
+                f"{qgis_geom_type}?crs={crs}",
                 layer_name,
                 "memory"
             )

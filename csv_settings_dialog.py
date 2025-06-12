@@ -14,7 +14,7 @@ class CsvSettingsDialog(QDialog):
         # Delimiter selection
         layout.addWidget(QLabel("Delimiter:"))
         self.delimiter_combo = QComboBox()
-        self.delimiter_combo.addItems(["Comma (,)", "Semicolon (;)", "Tab", "Space", "Pipe (|)"])
+        self.delimiter_combo.addItems(["Comma (,)", "Semicolon (;)", "Tab", "Pipe (|)"])
         self.delimiter_combo.setCurrentIndex(0)
         layout.addWidget(self.delimiter_combo)
         
@@ -138,7 +138,6 @@ class CsvSettingsDialog(QDialog):
         if text == "Comma (,)": return ","
         if text == "Semicolon (;)": return ";"
         if text == "Tab": return "\t"
-        if text == "Space": return " "
         if text == "Pipe (|)": return "|"
         return ","
     
