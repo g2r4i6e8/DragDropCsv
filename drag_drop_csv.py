@@ -16,6 +16,13 @@ from qgis.gui import QgsLayerTreeView
 from .csv_settings_dialog import CsvSettingsDialog
 from urllib.parse import quote
 
+# Debug flag - set to True to enable debug printing
+DEBUG = False
+
+def debug_print(*args, **kwargs):
+    """Print debug messages only when DEBUG is True"""
+    if DEBUG:
+        print(*args, **kwargs)
 
 class DragDropCsv(QObject):
     def __init__(self, iface):
@@ -46,9 +53,9 @@ class DragDropCsv(QObject):
             if os.path.exists(temp_file):
                 try:
                     os.unlink(temp_file)
-                    print(f"Cleaned up temporary file: {temp_file}")
+                    debug_print(f"Cleaned up temporary file: {temp_file}")
                 except Exception as e:
-                    print(f"Warning: Could not delete temporary file {temp_file}: {str(e)}")
+                    debug_print(f"Warning: Could not delete temporary file {temp_file}: {str(e)}")
         self.temp_files = []
         
     def save_settings(self, settings_dict):
@@ -81,7 +88,7 @@ class DragDropCsv(QObject):
                 file_path = url.toLocalFile()
                 if file_path and (file_path.lower().endswith('.csv.gz') or file_path.lower().endswith('.csv')):
                     try:
-                        print(f"Processing file dropped on main window: {file_path}")
+                        debug_print(f"Processing file dropped on main window: {file_path}")
                         if file_path.lower().endswith('.csv.gz'):
                             self.process_gzipped_csv(file_path)
                         else:
@@ -89,7 +96,7 @@ class DragDropCsv(QObject):
                         event.accept()
                         return True
                     except Exception as e:
-                        print(f"Error processing file {file_path}: {str(e)}")
+                        debug_print(f"Error processing file {file_path}: {str(e)}")
                         QMessageBox.warning(
                             self.iface.mainWindow(),
                             "Error loading CSV",
@@ -108,7 +115,7 @@ class DragDropCsv(QObject):
                 file_path = url.toLocalFile()
                 if file_path and (file_path.lower().endswith('.csv.gz') or file_path.lower().endswith('.csv')):
                     try:
-                        print(f"Processing file: {file_path}")
+                        debug_print(f"Processing file: {file_path}")
                         if file_path.lower().endswith('.csv.gz'):
                             self.process_gzipped_csv(file_path)
                         else:
@@ -116,7 +123,7 @@ class DragDropCsv(QObject):
                         event.accept()
                         return True
                     except Exception as e:
-                        print(f"Error processing file {file_path}: {str(e)}")
+                        debug_print(f"Error processing file {file_path}: {str(e)}")
                         QMessageBox.warning(
                             self.iface.mainWindow(),
                             "Error loading CSV",
@@ -128,7 +135,7 @@ class DragDropCsv(QObject):
         
     def detect_encoding(self, file_path):
         """Try to detect file encoding using chardet"""
-        print("Detecting file encoding...")
+        debug_print("Detecting file encoding...")
         try:
             # Read a sample of the file for detection
             with open(file_path, 'rb') as f:
@@ -139,17 +146,17 @@ class DragDropCsv(QObject):
             detected_encoding = result['encoding']
             confidence = result['confidence']
             
-            print(f"Detected encoding: {detected_encoding} with confidence: {confidence}")
+            debug_print(f"Detected encoding: {detected_encoding} with confidence: {confidence}")
             
             # If confidence is low, try some common encodings
             if confidence < 0.7:
-                print("Low confidence in detection, trying common encodings...")
+                debug_print("Low confidence in detection, trying common encodings...")
                 common_encodings = ['utf-8', 'windows-1251', 'cp1251', 'ascii', 'iso-8859-1']
                 for encoding in common_encodings:
                     try:
                         with open(file_path, 'r', encoding=encoding) as f:
                             f.readline()
-                        print(f"Successfully tested with {encoding}")
+                        debug_print(f"Successfully tested with {encoding}")
                         return encoding
                     except UnicodeDecodeError:
                         continue
@@ -161,26 +168,26 @@ class DragDropCsv(QObject):
                         f.readline()
                     return detected_encoding
                 except UnicodeDecodeError:
-                    print(f"Detected encoding {detected_encoding} failed verification")
+                    debug_print(f"Detected encoding {detected_encoding} failed verification")
             
             # Fallback to utf-8 if all else fails
-            print("Using fallback encoding: utf-8")
+            debug_print("Using fallback encoding: utf-8")
             return 'utf-8'
             
         except Exception as e:
-            print(f"Error during encoding detection: {str(e)}")
+            debug_print(f"Error during encoding detection: {str(e)}")
             return 'utf-8'  # Default to UTF-8 if detection fails
         
     def validate_csv(self, file_path, encoding, delimiter):
         """Validate CSV file and return column names"""
-        print(f"Validating CSV file with encoding={encoding}, delimiter={delimiter}")
+        debug_print(f"Validating CSV file with encoding={encoding}, delimiter={delimiter}")
         try:
             with open(file_path, 'r', encoding=encoding) as f:
                 # Read first line to check if file is not empty
                 first_line = f.readline().strip()
                 if not first_line:
                     raise Exception("File is empty")
-                print(f"First line: {first_line}")
+                debug_print(f"First line: {first_line}")
                 
                 # Try to parse the first line
                 reader = csv.reader([first_line], delimiter=delimiter)
@@ -191,7 +198,7 @@ class DragDropCsv(QObject):
                 
                 # Clean column names
                 columns = [col.strip('"\'') for col in columns]
-                print(f"Found columns: {columns}")
+                debug_print(f"Found columns: {columns}")
                 
                 # Read a few more lines to validate data
                 f.seek(0)
@@ -202,20 +209,20 @@ class DragDropCsv(QObject):
                     if i >= 5:  # Check first 5 rows
                         break
                     if len(row) != len(columns):
-                        print(f"Row {i+2}: {row}")
-                        print(f"Expected {len(columns)} columns, got {len(row)}")
+                        debug_print(f"Row {i+2}: {row}")
+                        debug_print(f"Expected {len(columns)} columns, got {len(row)}")
                         raise Exception(f"Row {i+2} has {len(row)} columns, expected {len(columns)}")
-                    print(f"Row {i+2} validated: {row}")
+                    debug_print(f"Row {i+2} validated: {row}")
                 
                 return columns
                 
         except Exception as e:
-            print(f"CSV validation failed: {str(e)}")
+            debug_print(f"CSV validation failed: {str(e)}")
             raise Exception(f"CSV validation failed: {str(e)}")
     
     def create_layer_uri(self, file_path, delimiter, encoding, geometry_type, x_col=None, y_col=None, wkt_col=None, crs=None):
         """Create and validate layer URI"""
-        print("Creating layer URI...")
+        debug_print("Creating layer URI...")
         
         # Convert Windows path to URL format
         file_path = file_path.replace('\\', '/')
@@ -243,19 +250,19 @@ class DragDropCsv(QObject):
         if crs:
             uri += f"&crs={crs}"
             
-        print(f"Created URI: {uri}")
+        debug_print(f"Created URI: {uri}")
         
         # Validate URI by creating a test layer
         test_layer = QgsVectorLayer(uri, "test", "delimitedtext")
         if not test_layer.isValid():
-            print(f"URI validation failed. Layer error: {test_layer.error().message()}")
+            debug_print(f"URI validation failed. Layer error: {test_layer.error().message()}")
             raise Exception(f"Invalid layer URI: {test_layer.error().message()}")
             
         return uri
         
     def create_editable_layer(self, source_layer, layer_name):
         """Create an editable memory layer from a source layer"""
-        print("Creating editable memory layer...")
+        debug_print("Creating editable memory layer...")
         
         # Get source layer properties
         data_provider = source_layer.dataProvider()
@@ -291,7 +298,7 @@ class DragDropCsv(QObject):
 
     def process_wkt_geometries(self, file_path, delimiter, encoding, wkt_col, crs, base_layer_name):
         """Process WKT geometries and create separate layers for each geometry type"""
-        print("Processing WKT geometries...")
+        debug_print("Processing WKT geometries...")
         
         # Dictionary to store features by geometry type
         geometry_features = {}
@@ -330,7 +337,7 @@ class DragDropCsv(QObject):
                             geometry_features[type_name] = []
                         geometry_features[type_name].append(feature)
                 except Exception as e:
-                    print(f"Error processing WKT: {wkt}, Error: {str(e)}")
+                    debug_print(f"Error processing WKT: {wkt}, Error: {str(e)}")
                     continue
         
         # Create layers for each geometry type
@@ -362,7 +369,7 @@ class DragDropCsv(QObject):
             )
             
             if not memory_layer.isValid():
-                print(f"Failed to create layer for {geom_type}")
+                debug_print(f"Failed to create layer for {geom_type}")
                 continue
             
             # Add fields
@@ -379,20 +386,20 @@ class DragDropCsv(QObject):
             self.project.addMapLayer(memory_layer)
             created_layers.append(memory_layer)
             
-            print(f"Created layer {layer_name} with {len(features)} features")
+            debug_print(f"Created layer {layer_name} with {len(features)} features")
         
         return created_layers
 
     def process_csv(self, file_path):
         """Process a regular CSV file"""
-        print(f"Starting to process CSV file: {file_path}")
+        debug_print(f"Starting to process CSV file: {file_path}")
         
         try:
             # Detect encoding
             encoding = self.detect_encoding(file_path)
             
             # Show settings dialog
-            print("Opening settings dialog...")
+            debug_print("Opening settings dialog...")
             dialog = CsvSettingsDialog(self.iface.mainWindow())
             
             # Load previous settings if available
@@ -448,7 +455,7 @@ class DragDropCsv(QObject):
                     dialog.custom_crs_input.setText(last_settings.get('crs', '').replace('EPSG:', ''))
             
             if not dialog.exec_():
-                print("User canceled the operation")
+                debug_print("User canceled the operation")
                 return  # User canceled
             
             # Get user settings
@@ -526,23 +533,23 @@ class DragDropCsv(QObject):
                 )
                 
                 # Create the source vector layer
-                print("Creating source vector layer...")
+                debug_print("Creating source vector layer...")
                 source_layer = QgsVectorLayer(uri, layer_name, "delimitedtext")
                 
                 if not source_layer.isValid():
                     raise Exception(f"Failed to create valid layer from CSV: {source_layer.error().message()}")
-                print("Source layer created successfully")
+                debug_print("Source layer created successfully")
                 
                 # Create editable memory layer
                 memory_layer = self.create_editable_layer(source_layer, layer_name)
                 
                 # Add layer to project
-                print("Adding layer to project...")
+                debug_print("Adding layer to project...")
                 self.project.addMapLayer(memory_layer)
                 
                 # Zoom to layer extent if it has geometry
                 if memory_layer.wkbType() != QgsWkbTypes.NoGeometry:
-                    print("Zooming to layer extent...")
+                    debug_print("Zooming to layer extent...")
                     # Get the layer's extent in its source CRS
                     layer_extent = memory_layer.extent()
                     # Transform the extent to the canvas CRS
@@ -554,30 +561,30 @@ class DragDropCsv(QObject):
                     self.canvas.setExtent(layer_extent)
                     self.canvas.refresh()
             
-            print("File processing completed successfully")
+            debug_print("File processing completed successfully")
             self.iface.mainWindow().statusBar().showMessage("Layer(s) loaded successfully", 3000)
             
         except Exception as e:
-            print(f"Error during processing: {str(e)}")
+            debug_print(f"Error during processing: {str(e)}")
             raise Exception(f"Error processing CSV file: {str(e)}")
         
     def process_gzipped_csv(self, file_path):
         """Extract and load a gzipped CSV file with user settings"""
-        print(f"Starting to process file: {file_path}")
+        debug_print(f"Starting to process file: {file_path}")
         
         # Create a temporary file for the extracted CSV
         temp_dir = tempfile.gettempdir()
         base_name = os.path.splitext(os.path.basename(file_path))[0]  # Remove .gz
         temp_csv_path = os.path.join(temp_dir, base_name)
-        print(f"Temporary file path: {temp_csv_path}")
+        debug_print(f"Temporary file path: {temp_csv_path}")
         
         try:
             # Extract the gzipped file
-            print("Extracting gzipped file...")
+            debug_print("Extracting gzipped file...")
             with gzip.open(file_path, 'rb') as gz_file:
                 with open(temp_csv_path, 'wb') as out_file:
                     out_file.write(gz_file.read())
-            print("File extracted successfully")
+            debug_print("File extracted successfully")
             
             # Add to temporary files list
             self.temp_files.append(temp_csv_path)
@@ -586,6 +593,6 @@ class DragDropCsv(QObject):
             self.process_csv(temp_csv_path)
             
         except Exception as e:
-            print(f"Error during processing: {str(e)}")
+            debug_print(f"Error during processing: {str(e)}")
             self.cleanup_temp_files()
             raise Exception(f"Error processing CSV.GZ file: {str(e)}")
