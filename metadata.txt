@@ -2,7 +2,7 @@
 name=Drag and Drop CSV
 qgisMinimumVersion=3.0
 description=Allows drag and drop of .csv and .csv.gz files into QGIS with instant editing
-version=1.0
+version=1.1
 author=Andrey Kolomatskiy
 email=kolomatsky.andrew@gmail.com
 homepage=https://github.com/g2r4i6e8/DragDropCsv
