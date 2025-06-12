@@ -196,10 +196,9 @@ class DragDropCsv(QObject):
         
         # Add geometry settings
         if geometry_type == "No geometry":
-            uri += "&wktField="
-        elif "WKT" in geometry_type:
-            wkt_type = geometry_type.split()[0].lower()
-            uri += f"&wktField={wkt_col}&geometryType={wkt_type}"
+            uri += "&geometryType=none"
+        elif geometry_type == "WKT":
+            uri += f"&wktField={wkt_col}"
         elif "X/Y columns" in geometry_type:
             uri += f"&xField={x_col}&yField={y_col}"
         

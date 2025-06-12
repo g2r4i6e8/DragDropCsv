@@ -30,10 +30,8 @@ class CsvSettingsDialog(QDialog):
         self.geometry_combo = QComboBox()
         self.geometry_combo.addItems([
             "No geometry", 
-            "Point (WKT)", 
-            "Point (X/Y columns)", 
-            "Line (WKT)", 
-            "Polygon (WKT)"
+            "WKT", 
+            "Point (X/Y columns)"
         ])
         self.geometry_combo.setCurrentIndex(0)
         layout.addWidget(self.geometry_combo)
