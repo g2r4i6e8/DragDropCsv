@@ -86,6 +86,7 @@ class CsvSettingsDialog(QDialog):
         # Connect signals
         self.geometry_combo.currentTextChanged.connect(self.update_geometry_options)
         self.crs_4326_radio.toggled.connect(lambda: self.custom_crs_input.setEnabled(not self.crs_4326_radio.isChecked()))
+        self.delimiter_combo.currentTextChanged.connect(self.on_delimiter_changed)
         
         # Buttons
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -94,9 +95,32 @@ class CsvSettingsDialog(QDialog):
         layout.addWidget(self.button_box)
         
         self.setLayout(layout)
+        
+        # Store original columns
+        self.original_columns = []
+    
+    def on_delimiter_changed(self, delimiter_text):
+        """Handle delimiter changes by reparsing columns"""
+        if not self.original_columns:
+            return
+            
+        # Get the new delimiter
+        new_delimiter = self.get_delimiter()
+        
+        # Reparse the first line with the new delimiter
+        first_line = self.original_columns[0]
+        if isinstance(first_line, str):
+            # If it's a string, split it with the new delimiter
+            columns = [col.strip('"\'') for col in first_line.split(new_delimiter)]
+        else:
+            # If it's already a list, join and resplit
+            columns = [col.strip('"\'') for col in new_delimiter.join(first_line).split(new_delimiter)]
+            
+        # Update the column lists
+        self.set_columns(columns)
     
     def update_geometry_options(self, text):
-        """Show/hide column options based on geometry selection"""
+        """Show/hide column options based on geometry type"""
         show_xy = "X/Y columns" in text
         show_wkt = "WKT" in text
         
@@ -138,6 +162,9 @@ class CsvSettingsDialog(QDialog):
     
     def set_columns(self, columns):
         """Set available columns for X/Y/WKT selection"""
+        # Store original columns for delimiter changes
+        self.original_columns = columns
+        
         self.x_column_combo.clear()
         self.y_column_combo.clear()
         self.wkt_column_combo.clear()

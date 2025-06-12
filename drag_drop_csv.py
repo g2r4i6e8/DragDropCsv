@@ -5,6 +5,7 @@ import csv
 import re
 import time
 import json
+import chardet
 from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings, QVariant
 from qgis.PyQt.QtWidgets import QMessageBox, QCheckBox
 from qgis.core import (
@@ -125,20 +126,49 @@ class DragDropCsv(QObject):
         return False
         
     def detect_encoding(self, file_path):
-        """Try to detect file encoding"""
+        """Try to detect file encoding using chardet"""
         print("Detecting file encoding...")
-        encodings = ['utf-8', 'ascii', 'utf-16', 'windows-1251', 'iso-8859-1']
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    f.readline()
-                print(f"Detected encoding: {encoding}")
-                return encoding
-            except UnicodeDecodeError:
-                print(f"Failed to decode with {encoding}")
-                continue
-        print("Using default encoding: utf-8")
-        return 'utf-8'  # Default to UTF-8 if detection fails
+        try:
+            # Read a sample of the file for detection
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(10000)  # Read first 10KB for detection
+            
+            # Detect encoding
+            result = chardet.detect(raw_data)
+            detected_encoding = result['encoding']
+            confidence = result['confidence']
+            
+            print(f"Detected encoding: {detected_encoding} with confidence: {confidence}")
+            
+            # If confidence is low, try some common encodings
+            if confidence < 0.7:
+                print("Low confidence in detection, trying common encodings...")
+                common_encodings = ['utf-8', 'windows-1251', 'cp1251', 'ascii', 'iso-8859-1']
+                for encoding in common_encodings:
+                    try:
+                        with open(file_path, 'r', encoding=encoding) as f:
+                            f.readline()
+                        print(f"Successfully tested with {encoding}")
+                        return encoding
+                    except UnicodeDecodeError:
+                        continue
+            
+            # If we have a detected encoding, verify it works
+            if detected_encoding:
+                try:
+                    with open(file_path, 'r', encoding=detected_encoding) as f:
+                        f.readline()
+                    return detected_encoding
+                except UnicodeDecodeError:
+                    print(f"Detected encoding {detected_encoding} failed verification")
+            
+            # Fallback to utf-8 if all else fails
+            print("Using fallback encoding: utf-8")
+            return 'utf-8'
+            
+        except Exception as e:
+            print(f"Error during encoding detection: {str(e)}")
+            return 'utf-8'  # Default to UTF-8 if detection fails
         
     def validate_csv(self, file_path, encoding, delimiter):
         """Validate CSV file and return column names"""
@@ -355,18 +385,29 @@ class DragDropCsv(QObject):
             print("Opening settings dialog...")
             dialog = CsvSettingsDialog(self.iface.mainWindow())
             dialog.set_columns(columns)
-            dialog.encoding_combo.setCurrentText(encoding.upper())
+            
+            # Convert encoding name to match dialog options
+            encoding_map = {
+                'utf-8': 'UTF-8',
+                'utf-16': 'UTF-16',
+                'windows-1251': 'Windows-1251',
+                'cp1251': 'Windows-1251',
+                'ascii': 'ASCII',
+                'iso-8859-1': 'ISO-8859-1'
+            }
+            dialog_encoding = encoding_map.get(encoding.lower(), 'UTF-8')
+            dialog.encoding_combo.setCurrentText(dialog_encoding)
             
             # Add "Remember settings" checkbox
             remember_settings = QCheckBox("Remember these settings for next time")
+            remember_settings.setChecked(True)  # Set checkbox to checked by default
             dialog.layout().insertWidget(dialog.layout().count() - 1, remember_settings)
             
             # Load previous settings if available
             last_settings = self.load_settings()
             if last_settings:
                 dialog.delimiter_combo.setCurrentText(last_settings.get('delimiter', 'Comma (,)'))
-                dialog.encoding_combo.setCurrentText(last_settings.get('encoding', 'UTF-8'))
-                # Don't override geometry type if it was auto-detected
+                # Don't override detected encoding
                 if not any(x in dialog.geometry_combo.currentText().lower() for x in ['wkt', 'x/y']):
                     dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
                 if last_settings.get('crs') == 'EPSG:4326':
