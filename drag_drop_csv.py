@@ -24,6 +24,45 @@ def debug_print(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
 
+def detect_field_type(values):
+    """Detect the appropriate field type based on sample values"""
+    if not values:
+        return QVariant.String
+    
+    # Remove empty values
+    non_empty_values = [v for v in values if v and str(v).strip()]
+    if not non_empty_values:
+        return QVariant.String
+    
+    # Check if all values are integers
+    try:
+        for val in non_empty_values:
+            int(val)
+        return QVariant.Int
+    except (ValueError, TypeError):
+        pass
+    
+    # Check if all values are doubles/floats
+    try:
+        for val in non_empty_values:
+            float(val)
+        return QVariant.Double
+    except (ValueError, TypeError):
+        pass
+    
+    # Check if all values are dates (simple check)
+    date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+    if all(date_pattern.match(str(val)) for val in non_empty_values):
+        return QVariant.Date
+    
+    # Check if all values are datetime (simple check)
+    datetime_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
+    if all(datetime_pattern.match(str(val)) for val in non_empty_values):
+        return QVariant.DateTime
+    
+    # Default to string
+    return QVariant.String
+
 class DragDropCsv(QObject):
     def __init__(self, iface):
         super().__init__()
@@ -268,7 +307,7 @@ class DragDropCsv(QObject):
         data_provider = source_layer.dataProvider()
         geometry_type = QgsWkbTypes.displayString(data_provider.wkbType())
         crs = data_provider.sourceCrs().authid()
-        fields = data_provider.fields().toList()
+        source_fields = data_provider.fields()
         
         # Create memory layer
         memory_layer = QgsVectorLayer(
@@ -283,8 +322,12 @@ class DragDropCsv(QObject):
         # Start editing
         memory_layer.startEditing()
         
-        # Add fields
-        memory_layer.dataProvider().addAttributes(fields)
+        # Add fields with proper types
+        memory_fields = QgsFields()
+        for field in source_fields:
+            memory_fields.append(QgsField(field.name(), field.type()))
+        
+        memory_layer.dataProvider().addAttributes(memory_fields)
         memory_layer.updateFields()
         
         # Copy features
@@ -303,12 +346,29 @@ class DragDropCsv(QObject):
         # Dictionary to store features by geometry type
         geometry_features = {}
         
-        # Read the CSV file
+        # First pass: collect data for field type detection
+        field_data = {}
+        
+        # Read the CSV file for data collection
         with open(file_path, 'r', encoding=encoding) as f:
             reader = csv.DictReader(f, delimiter=delimiter)
             
             # Get field names excluding the WKT column
             field_names = [f for f in reader.fieldnames if f != wkt_col]
+            
+            # Initialize field data collection
+            for field_name in field_names:
+                field_data[field_name] = []
+            
+            # Collect sample data for field type detection
+            for row in reader:
+                for field_name in field_names:
+                    if field_name in row:
+                        field_data[field_name].append(row[field_name])
+        
+        # Second pass: process features
+        with open(file_path, 'r', encoding=encoding) as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
             
             for row in reader:
                 wkt = row[wkt_col]
@@ -375,7 +435,9 @@ class DragDropCsv(QObject):
             # Add fields
             fields = QgsFields()
             for field_name in field_names:
-                fields.append(QgsField(field_name, QVariant.String))
+                # Detect field type based on collected data
+                field_type = detect_field_type(field_data[field_name])
+                fields.append(QgsField(field_name, field_type))
             memory_layer.dataProvider().addAttributes(fields)
             memory_layer.updateFields()
             
