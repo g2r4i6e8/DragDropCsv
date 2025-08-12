@@ -63,6 +63,46 @@ def detect_field_type(values):
     # Default to string
     return QVariant.String
 
+def normalize_wkt(wkt_text):
+    """Normalize WKT strings to improve parser compatibility.
+
+    Fixes common non-standard forms such as "LINESTRING((...))" or
+    "POINT((...))" by removing the redundant pair of parentheses. Also
+    preserves dimensionality tokens (Z, M, ZM) when present.
+    """
+    if not wkt_text:
+        return wkt_text
+
+    text = str(wkt_text).strip()
+
+    # Strip surrounding quotes if present
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        text = text[1:-1].strip()
+
+    # Handle EWKT prefix like SRID=4326;WKT
+    if text.upper().startswith('SRID='):
+        semi = text.find(';')
+        if semi != -1:
+            text = text[semi+1:].strip()
+
+    # Patterns to collapse double parentheses for LINESTRING and POINT
+    line_pattern = re.compile(r"^\s*LINESTRING(\s+(?:Z|M|ZM))?\s*\(\(\s*(.*?)\s*\)\)\s*$", re.IGNORECASE)
+    point_pattern = re.compile(r"^\s*POINT(\s+(?:Z|M|ZM))?\s*\(\(\s*(.*?)\s*\)\)\s*$", re.IGNORECASE)
+
+    match_line = line_pattern.match(text)
+    if match_line:
+        dim = match_line.group(1) or ""
+        inner = match_line.group(2)
+        return f"LINESTRING{dim} ({inner})"
+
+    match_point = point_pattern.match(text)
+    if match_point:
+        dim = match_point.group(1) or ""
+        inner = match_point.group(2)
+        return f"POINT{dim} ({inner})"
+
+    return text
+
 class DragDropCsv(QObject):
     def __init__(self, iface):
         super().__init__()
@@ -352,9 +392,14 @@ class DragDropCsv(QObject):
         # Read the CSV file for data collection
         with open(file_path, 'r', encoding=encoding) as f:
             reader = csv.DictReader(f, delimiter=delimiter)
-            
+
+            # Normalize column name comparison (handle quotes and case)
+            wkt_col_norm = (wkt_col or '').strip().strip("'\"").lower()
             # Get field names excluding the WKT column
-            field_names = [f for f in reader.fieldnames if f != wkt_col]
+            field_names = [
+                col for col in (reader.fieldnames or [])
+                if (col or '').strip().strip("'\"").lower() != wkt_col_norm
+            ]
             
             # Initialize field data collection
             for field_name in field_names:
@@ -362,16 +407,30 @@ class DragDropCsv(QObject):
             
             # Collect sample data for field type detection
             for row in reader:
+                if not row:
+                    continue
+                # Case-insensitive value access snapshot for robustness
+                row_lower = { (k or '').lower(): v for k, v in row.items() }
                 for field_name in field_names:
-                    if field_name in row:
-                        field_data[field_name].append(row[field_name])
+                    val = row.get(field_name)
+                    if val is None:
+                        val = row_lower.get((field_name or '').lower())
+                    field_data[field_name].append(val)
         
         # Second pass: process features
         with open(file_path, 'r', encoding=encoding) as f:
             reader = csv.DictReader(f, delimiter=delimiter)
+
+            # Prepare normalized access keys
+            wkt_col_norm = (wkt_col or '').strip().strip("'\"").lower()
             
             for row in reader:
-                wkt = row[wkt_col]
+                if not row:
+                    continue
+                row_lower = { (k or '').lower(): v for k, v in row.items() }
+                wkt = row.get(wkt_col)
+                if wkt is None:
+                    wkt = row_lower.get(wkt_col_norm)
                 if not wkt:
                     continue
                     
@@ -379,18 +438,23 @@ class DragDropCsv(QObject):
                 feature = QgsFeature()
                 
                 # Add attributes
-                attrs = [row[f] for f in field_names]
+                attrs = []
+                for f_name in field_names:
+                    val = row.get(f_name)
+                    if val is None:
+                        val = row_lower.get((f_name or '').lower())
+                    attrs.append(val)
                 feature.setAttributes(attrs)
                 
-                # Try to create geometry from WKT
+                # Try to create geometry from WKT (with normalization for non-standard forms)
                 try:
-                    geometry = QgsGeometry.fromWkt(wkt)
+                    normalized_wkt = normalize_wkt(wkt)
+                    geometry = QgsGeometry.fromWkt(normalized_wkt)
                     if not geometry.isNull():
                         feature.setGeometry(geometry)
                         
-                        # Get geometry type
-                        geom_type = geometry.type()
-                        type_name = QgsWkbTypes.geometryDisplayString(geom_type)
+                        # Get precise WKB type name (e.g., LineString, Polygon)
+                        type_name = QgsWkbTypes.displayString(geometry.wkbType())
                         
                         # Add feature to appropriate geometry type list
                         if type_name not in geometry_features:
@@ -421,9 +485,28 @@ class DragDropCsv(QObject):
             }
             qgis_geom_type = geom_type_map.get(geom_type, geom_type)
             
-            # Create memory layer
+            # Determine CRS for the layer. If the project CRS differs from the
+            # source CRS, transform geometries to the project CRS so the layer
+            # aligns in the current project without relying on on-the-fly transform.
+            source_crs = QgsCoordinateReferenceSystem(crs)
+            project_crs = self.project.crs()
+
+            target_authid = crs
+            if project_crs.isValid() and source_crs.isValid() and project_crs != source_crs:
+                try:
+                    transformer = QgsCoordinateTransform(source_crs, project_crs, self.project)
+                    for feature in features:
+                        geom = feature.geometry()
+                        if geom and not geom.isNull():
+                            geom.transform(transformer)
+                            feature.setGeometry(geom)
+                    target_authid = project_crs.authid()
+                except Exception as transform_error:
+                    debug_print(f"CRS transform failed, keeping source CRS: {transform_error}")
+
+            # Create memory layer in the decided CRS
             memory_layer = QgsVectorLayer(
-                f"{qgis_geom_type}?crs={crs}",
+                f"{qgis_geom_type}?crs={target_authid}",
                 layer_name,
                 "memory"
             )
@@ -438,11 +521,28 @@ class DragDropCsv(QObject):
                 # Detect field type based on collected data
                 field_type = detect_field_type(field_data[field_name])
                 fields.append(QgsField(field_name, field_type))
-            memory_layer.dataProvider().addAttributes(fields)
+            provider = memory_layer.dataProvider()
+            provider.addAttributes(fields)
             memory_layer.updateFields()
-            
+
+            # Bind features to layer fields to ensure attributes match schema
+            layer_fields = memory_layer.fields()
+            prepared_features = []
+            for f in features:
+                f.setFields(layer_fields, initAttributes=True)
+                # Ensure attribute count matches
+                attrs = f.attributes()
+                if len(attrs) != layer_fields.count():
+                    # Resize/pad attributes if necessary
+                    padded = list(attrs)[: layer_fields.count()]
+                    if len(padded) < layer_fields.count():
+                        padded.extend([None] * (layer_fields.count() - len(padded)))
+                    f.setAttributes(padded)
+                prepared_features.append(f)
+
             # Add features
-            memory_layer.dataProvider().addFeatures(features)
+            provider.addFeatures(prepared_features)
+            memory_layer.updateExtents()
             
             # Add layer to project
             self.project.addMapLayer(memory_layer)
@@ -450,6 +550,48 @@ class DragDropCsv(QObject):
             
             debug_print(f"Created layer {layer_name} with {len(features)} features")
         
+        # Fallback: if nothing was created (e.g., due to unexpected WKT), try using
+        # QGIS delimited text provider directly with wktField to leverage its parser.
+        if not created_layers:
+            try:
+                uri = self.create_layer_uri(
+                    file_path=file_path,
+                    delimiter=delimiter,
+                    encoding=encoding,
+                    geometry_type="WKT",
+                    wkt_col=wkt_col,
+                    crs=crs,
+                )
+                fallback_layer_name = base_layer_name
+                source_layer = QgsVectorLayer(uri, fallback_layer_name, "delimitedtext")
+                if source_layer.isValid() and source_layer.featureCount() > 0:
+                    # Optionally reproject to project CRS for consistent behavior
+                    project_crs = self.project.crs()
+                    if project_crs.isValid() and source_layer.crs().isValid() and project_crs != source_layer.crs():
+                        # Create editable memory layer and transform features
+                        mem = self.create_editable_layer(source_layer, fallback_layer_name)
+                        # Transform geometry in-place to project CRS
+                        try:
+                            transform = QgsCoordinateTransform(mem.crs(), project_crs, self.project)
+                            mem.startEditing()
+                            for feature in mem.getFeatures():
+                                geom = feature.geometry()
+                                if geom and not geom.isNull():
+                                    geom.transform(transform)
+                                    mem.dataProvider().changeGeometryValues({feature.id(): geom})
+                            mem.commitChanges()
+                            mem.setCrs(project_crs)
+                        except Exception as e:
+                            debug_print(f"Fallback CRS transform failed: {e}")
+                        self.project.addMapLayer(mem)
+                        created_layers.append(mem)
+                    else:
+                        # Add as-is
+                        self.project.addMapLayer(source_layer)
+                        created_layers.append(source_layer)
+            except Exception as e:
+                debug_print(f"Fallback to delimited text provider failed: {e}")
+
         return created_layers
 
     def process_csv(self, file_path):
