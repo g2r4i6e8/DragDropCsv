@@ -34,10 +34,18 @@ def detect_field_type(values):
     if not non_empty_values:
         return QVariant.String
     
-    # Check if all values are integers
+    # Check if all values are integers. If any integer exceeds 32-bit range,
+    # treat the field as text to avoid overflow/NULLs in QGIS providers.
     try:
+        parsed_ints = []
         for val in non_empty_values:
-            int(val)
+            parsed = int(str(val).strip())
+            parsed_ints.append(parsed)
+        # 32-bit signed integer limits
+        INT32_MIN = -2147483648
+        INT32_MAX = 2147483647
+        if any(i < INT32_MIN or i > INT32_MAX for i in parsed_ints):
+            return QVariant.String
         return QVariant.Int
     except (ValueError, TypeError):
         pass
@@ -529,7 +537,8 @@ class DragDropCsv(QObject):
             layer_fields = memory_layer.fields()
             prepared_features = []
             for f in features:
-                f.setFields(layer_fields, initAttributes=True)
+                # Preserve existing attributes; do not reinitialize to NULLs
+                f.setFields(layer_fields, initAttributes=False)
                 # Ensure attribute count matches
                 attrs = f.attributes()
                 if len(attrs) != layer_fields.count():
