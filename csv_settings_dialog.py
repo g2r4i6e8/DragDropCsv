@@ -1,8 +1,9 @@
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QComboBox, QDialogButtonBox,
-    QLineEdit, QGroupBox, QHBoxLayout, QRadioButton, QButtonGroup
+    QPushButton, QGroupBox, QHBoxLayout
 )
 from qgis.core import QgsCoordinateReferenceSystem
+from qgis.gui import QgsProjectionSelectionDialog
 
 class CsvSettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -60,32 +61,28 @@ class CsvSettingsDialog(QDialog):
         self.y_column_label.setVisible(False)
         self.y_column_combo.setVisible(False)
         
-        # Coordinate System selection
+        # Coordinate System selection (Current CRS + Choose CRS button)
+        self.selected_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+
         crs_group = QGroupBox("Coordinate Reference System")
         crs_layout = QVBoxLayout()
-        
-        self.crs_4326_radio = QRadioButton("EPSG:4326 (WGS 84)")
-        self.crs_custom_radio = QRadioButton("Custom")
-        self.crs_4326_radio.setChecked(True)
-        
-        crs_layout.addWidget(self.crs_4326_radio)
-        crs_layout.addWidget(self.crs_custom_radio)
-        
-        # Custom CRS input
-        custom_crs_layout = QHBoxLayout()
-        self.custom_crs_input = QLineEdit()
-        self.custom_crs_input.setPlaceholderText("Enter EPSG code (e.g., 4326)")
-        self.custom_crs_input.setEnabled(False)
-        custom_crs_layout.addWidget(QLabel("EPSG:"))
-        custom_crs_layout.addWidget(self.custom_crs_input)
-        crs_layout.addLayout(custom_crs_layout)
-        
+
+        current_layout = QHBoxLayout()
+        current_layout.addWidget(QLabel("Current CRS:"))
+        self.crs_display_label = QLabel(self.selected_crs.authid())
+        current_layout.addWidget(self.crs_display_label)
+        current_layout.addStretch(1)
+        crs_layout.addLayout(current_layout)
+
+        self.choose_crs_button = QPushButton("Choose CRS")
+        self.choose_crs_button.clicked.connect(self.open_crs_chooser)
+        crs_layout.addWidget(self.choose_crs_button)
+
         crs_group.setLayout(crs_layout)
         layout.addWidget(crs_group)
         
         # Connect signals
         self.geometry_combo.currentTextChanged.connect(self.update_geometry_options)
-        self.crs_4326_radio.toggled.connect(lambda: self.custom_crs_input.setEnabled(not self.crs_4326_radio.isChecked()))
         self.delimiter_combo.currentTextChanged.connect(self.on_delimiter_changed)
         
         # Buttons
@@ -146,14 +143,29 @@ class CsvSettingsDialog(QDialog):
         return self.encoding_combo.currentText()
     
     def get_crs(self):
-        """Return the selected CRS"""
-        if self.crs_4326_radio.isChecked():
-            return "EPSG:4326"
-        else:
-            epsg = self.custom_crs_input.text().strip()
-            if epsg:
-                return f"EPSG:{epsg}"
-            return "EPSG:4326"  # Default to WGS84 if invalid input
+        """Return the selected CRS as auth id (e.g., EPSG:4326)"""
+        if getattr(self, 'selected_crs', None) and self.selected_crs.isValid():
+            return self.selected_crs.authid()
+        return "EPSG:4326"
+
+    def set_crs(self, crs_authid):
+        """Set the current CRS by auth id and update display"""
+        crs = QgsCoordinateReferenceSystem(crs_authid)
+        if not crs.isValid():
+            crs = QgsCoordinateReferenceSystem("EPSG:4326")
+        self.selected_crs = crs
+        self.crs_display_label.setText(self.selected_crs.authid())
+
+    def open_crs_chooser(self):
+        """Open standard QGIS CRS selection dialog"""
+        dlg = QgsProjectionSelectionDialog(self)
+        if getattr(self, 'selected_crs', None) and self.selected_crs.isValid():
+            dlg.setCrs(self.selected_crs)
+        if dlg.exec_():
+            chosen = dlg.crs()
+            if chosen and chosen.isValid():
+                self.selected_crs = chosen
+                self.crs_display_label.setText(self.selected_crs.authid())
     
     def get_geometry_type(self):
         """Return the selected geometry type"""

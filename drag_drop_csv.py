@@ -652,11 +652,7 @@ class DragDropCsv(QObject):
             last_settings = self.load_settings()
             if last_settings:
                 dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
-                if last_settings.get('crs') == 'EPSG:4326':
-                    dialog.crs_4326_radio.setChecked(True)
-                else:
-                    dialog.crs_custom_radio.setChecked(True)
-                    dialog.custom_crs_input.setText(last_settings.get('crs', '').replace('EPSG:', ''))
+                dialog.set_crs(last_settings.get('crs', 'EPSG:4326'))
             
             if not dialog.exec_():
                 debug_print("User canceled the operation")
