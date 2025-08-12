@@ -1,0 +1,10 @@
+id,name,category,description,price_eur,rating,visits_count,is_open,created_date,updated_at,geometry,notes,score,tags,distance_m,elevation_m
+1,Café de l'Université,Cafe,"A cozy café near the Seine",3.50,4.6,125,1,2025-07-01,2025-08-12 10:00:00,POINT (2.3490 48.8530),Terrace,87.5,coffee;wifi,150,35.2
+2,Musée Central,Museum,Large collection in the heart of Paris,12.00,4.8,980,1,2025-06-20,2025-08-10 09:30:00,POINT (2.3330 48.8600),Free on first Sunday,92.1,art;history,400,34.0
+3,Parc Monceau Nord,Park,Shady lawns and winding paths,0.00,4.4,540,1,2025-05-05,2025-08-08 16:20:00,POINT (2.2980 48.8730),Family friendly,84.3,park;green,320,37.8
+4,Seine Riverside Walk,Route,Short scenic walk along the river,0.00,4.7,210,1,2025-04-18,2025-08-09 11:15:00,"LINESTRING (2.3400 48.8570, 2.3450 48.8560, 2.3500 48.8550)",Great views,89.9,walk;river,700,33.6
+5,Boulevard St‑Germain Segment,Route,Bustling boulevard segment,0.00,4.2,360,1,2025-03-12,2025-08-07 14:05:00,"LINESTRING (2.3200 48.8660, 2.3250 48.8650, 2.3300 48.8640)",Shops and cafés,78.4,street;shops,950,36.1
+6,Bois de Boulogne Trail,Route,Leafy trail near the park edge,0.00,4.1,145,0,2025-02-22,2025-08-06 08:50:00,"LINESTRING (2.2800 48.8790, 2.2850 48.8780, 2.2900 48.8770)",Quiet mornings,73.2,trail;nature,1200,38.4
+7,Île Saint‑Louis Block,Area,Historic island block outline,0.00,4.5,60,1,2025-01-30,2025-08-05 13:40:00,"POLYGON ((2.3600 48.8500, 2.3650 48.8500, 2.3650 48.8550, 2.3600 48.8550, 2.3600 48.8500))",Cobbled streets,85.7,island;historic,500,32.9
+8,Champ de Mars Sector,Area,Open lawns near the tower,0.00,4.3,410,1,2024-12-18,2025-08-04 17:25:00,"POLYGON ((2.3000 48.8600, 2.3050 48.8600, 2.3050 48.8650, 2.3000 48.8650, 2.3000 48.8600))",Picnic spot,80.6,park;picnic,850,31.5
+9,Opéra District Block,Area,Grid block near Opéra,0.00,4.0,295,0,2024-11-10,2025-08-03 19:05:00,"POLYGON ((2.3350 48.8700, 2.3400 48.8700, 2.3400 48.8750, 2.3350 48.8750, 2.3350 48.8700))",Busy area,75.4,city;shopping,650,33.8
