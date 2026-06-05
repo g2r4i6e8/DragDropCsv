@@ -2,7 +2,7 @@
 name=Drag and Drop CSV
 qgisMinimumVersion=3.0
 description=Allows drag and drop of .csv and .csv.gz files into QGIS with instant editing
-version=1.2
+version=1.3
 author=Andrey Kolomatskiy
 email=kolomatsky.andrew@gmail.com
 homepage=https://github.com/g2r4i6e8/DragDropCsv
@@ -10,14 +10,20 @@ tracker=https://github.com/g2r4i6e8/DragDropCsv/issues
 repository=https://github.com/g2r4i6e8/DragDropCsv
 category=Vector
 icon=icon.png
-tags=csv, drag and drop, import, gzip, wkt, geometry, crs, epsg, datatypes
+tags=csv, drag and drop, import, gzip, wkt, h3, geometry, crs, epsg, datatypes
 about=This plugin allows users to drag and drop CSV and compressed CSV files (.csv.gz) directly into QGIS. The CSV opens as a temporary editable vector layer.
  It now includes:
  - Smarter data typing: strings stay strings; dates are parsed; numbers are recognized as integers or decimals.
  - Reliable WKT loading: geometry loads correctly even when the layer CRS differs from the project CRS.
  - Native CRS picker: choose CRS via the standard QGIS dialog.
+ - Optional H3 Index geometry when the h3 Python package is installed.
 
 changelog=
+  [1.3] Optional H3 Index geometry support
+   - Import CSV polygons from H3 cell ids (hex string or int64)
+   - H3 option appears only when the h3 package is installed
+   - H3 layers use WGS84 and are reprojected to the project CRS
+
   [1.2] Smarter typing; reliable WKT; native CRS picker
    - Smarter data typing: strings, dates, and numbers inferred robustly
    - Reliable WKT loading respecting layer/project CRS differences
@@ -25,4 +31,5 @@ changelog=
 
 [requirements]
 python>=3.0
-chardet>=3.0.0 
+chardet>=3.0.0
+h3>=3.7.0 

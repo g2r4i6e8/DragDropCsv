@@ -5,9 +5,12 @@ from qgis.PyQt.QtWidgets import (
 from qgis.core import QgsCoordinateReferenceSystem
 from qgis.gui import QgsProjectionSelectionDialog
 
+from .h3_utils import H3_CRS
+
 class CsvSettingsDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, h3_available=False):
         super().__init__(parent)
+        self.h3_available = h3_available
         self.setWindowTitle("CSV Import Settings")
         
         layout = QVBoxLayout()
@@ -29,11 +32,14 @@ class CsvSettingsDialog(QDialog):
         # Geometry selection
         layout.addWidget(QLabel("Geometry type:"))
         self.geometry_combo = QComboBox()
-        self.geometry_combo.addItems([
-            "No geometry", 
-            "WKT Geometry", 
-            "Point (X/Y columns)"
-        ])
+        geometry_types = [
+            "No geometry",
+            "WKT Geometry",
+            "Point (X/Y columns)",
+        ]
+        if self.h3_available:
+            geometry_types.append("H3 Index")
+        self.geometry_combo.addItems(geometry_types)
         self.geometry_combo.setCurrentIndex(0)
         layout.addWidget(self.geometry_combo)
         
@@ -44,6 +50,14 @@ class CsvSettingsDialog(QDialog):
         layout.addWidget(self.wkt_column_combo)
         self.wkt_column_label.setVisible(False)
         self.wkt_column_combo.setVisible(False)
+
+        # H3 column selection
+        self.h3_column_label = QLabel("H3 Column:")
+        self.h3_column_combo = QComboBox()
+        layout.addWidget(self.h3_column_label)
+        layout.addWidget(self.h3_column_combo)
+        self.h3_column_label.setVisible(False)
+        self.h3_column_combo.setVisible(False)
         
         # X/Y column names
         self.x_column_label = QLabel("X Column:")
@@ -64,7 +78,7 @@ class CsvSettingsDialog(QDialog):
         # Coordinate System selection (Current CRS + Choose CRS button)
         self.selected_crs = QgsCoordinateReferenceSystem("EPSG:4326")
 
-        crs_group = QGroupBox("Coordinate Reference System")
+        self.crs_group = QGroupBox("Coordinate Reference System")
         crs_layout = QVBoxLayout()
 
         current_layout = QHBoxLayout()
@@ -78,8 +92,8 @@ class CsvSettingsDialog(QDialog):
         self.choose_crs_button.clicked.connect(self.open_crs_chooser)
         crs_layout.addWidget(self.choose_crs_button)
 
-        crs_group.setLayout(crs_layout)
-        layout.addWidget(crs_group)
+        self.crs_group.setLayout(crs_layout)
+        layout.addWidget(self.crs_group)
         
         # Connect signals
         self.geometry_combo.currentTextChanged.connect(self.update_geometry_options)
@@ -120,6 +134,7 @@ class CsvSettingsDialog(QDialog):
         """Show/hide column options based on geometry type"""
         show_xy = "X/Y columns" in text
         show_wkt = "WKT" in text
+        show_h3 = "H3" in text
         
         self.x_column_label.setVisible(show_xy)
         self.x_column_combo.setVisible(show_xy)
@@ -128,6 +143,16 @@ class CsvSettingsDialog(QDialog):
         
         self.wkt_column_label.setVisible(show_wkt)
         self.wkt_column_combo.setVisible(show_wkt)
+
+        self.h3_column_label.setVisible(show_h3)
+        self.h3_column_combo.setVisible(show_h3)
+
+        # H3 geometry is always WGS84; lock CRS selection in that mode
+        if show_h3:
+            self.set_crs(H3_CRS)
+            self.choose_crs_button.setEnabled(False)
+        else:
+            self.choose_crs_button.setEnabled(True)
     
     def get_delimiter(self):
         """Return the selected delimiter character"""
@@ -144,6 +169,8 @@ class CsvSettingsDialog(QDialog):
     
     def get_crs(self):
         """Return the selected CRS as auth id (e.g., EPSG:4326)"""
+        if "H3" in self.geometry_combo.currentText():
+            return H3_CRS
         if getattr(self, 'selected_crs', None) and self.selected_crs.isValid():
             return self.selected_crs.authid()
         return "EPSG:4326"
@@ -172,13 +199,14 @@ class CsvSettingsDialog(QDialog):
         return self.geometry_combo.currentText()
     
     def set_columns(self, columns):
-        """Set available columns for X/Y/WKT selection"""
+        """Set available columns for X/Y/WKT/H3 selection"""
         # Store original columns for delimiter changes
         self.original_columns = columns
         
         self.x_column_combo.clear()
         self.y_column_combo.clear()
         self.wkt_column_combo.clear()
+        self.h3_column_combo.clear()
         
         # Clean column names (remove quotes if present)
         cleaned_columns = [col.strip('"\'') for col in columns]
@@ -186,11 +214,13 @@ class CsvSettingsDialog(QDialog):
         self.x_column_combo.addItems(cleaned_columns)
         self.y_column_combo.addItems(cleaned_columns)
         self.wkt_column_combo.addItems(cleaned_columns)
+        self.h3_column_combo.addItems(cleaned_columns)
         
         # Try to automatically detect columns
         x_cols = []
         y_cols = []
         wkt_cols = []
+        h3_cols = []
         
         for col in cleaned_columns:
             col_lower = col.lower()
@@ -204,25 +234,35 @@ class CsvSettingsDialog(QDialog):
             # Check for WKT/geometry columns
             if any(x in col_lower for x in ['wkt', 'geometry', 'geom', 'shape', 'the_geom']):
                 wkt_cols.append(col)
+
+            # Check for H3 index columns
+            if (
+                col_lower in ('h3', 'h3_id', 'h3_index', 'h3_cell', 'hex_id', 'cell_id')
+                or any(token in col_lower for token in ('h3_id', 'h3_index', 'h3_cell'))
+            ):
+                h3_cols.append(col)
         
-        # Set geometry type and columns based on detection
+        # Set geometry type and columns based on detection (WKT > X/Y > H3)
         if wkt_cols:
-            # Prefer WKT if available
             for i in range(self.geometry_combo.count()):
                 if "WKT Geometry" in self.geometry_combo.itemText(i):
                     self.geometry_combo.setCurrentIndex(i)
                     self.wkt_column_combo.setCurrentText(wkt_cols[0])
                     break
         elif x_cols and y_cols:
-            # Use X/Y if no WKT but coordinates found
             for i in range(self.geometry_combo.count()):
                 if "X/Y columns" in self.geometry_combo.itemText(i):
                     self.geometry_combo.setCurrentIndex(i)
                     self.x_column_combo.setCurrentText(x_cols[0])
                     self.y_column_combo.setCurrentText(y_cols[0])
                     break
+        elif h3_cols and self.h3_available:
+            for i in range(self.geometry_combo.count()):
+                if "H3 Index" in self.geometry_combo.itemText(i):
+                    self.geometry_combo.setCurrentIndex(i)
+                    self.h3_column_combo.setCurrentText(h3_cols[0])
+                    break
         else:
-            # Default to no geometry if nothing detected
             for i in range(self.geometry_combo.count()):
                 if "No geometry" in self.geometry_combo.itemText(i):
                     self.geometry_combo.setCurrentIndex(i)
@@ -236,3 +276,6 @@ class CsvSettingsDialog(QDialog):
         
     def get_wkt_column(self):
         return self.wkt_column_combo.currentText()
+
+    def get_h3_column(self):
+        return self.h3_column_combo.currentText()

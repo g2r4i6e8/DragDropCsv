@@ -1,0 +1,10 @@
+name,h3_id,category,visitors
+Louvre,891fb467533ffff,museum,8900000
+Eiffel Tower,617550903940743167,monument,7000000
+Notre-Dame,891fb46624bffff,cathedral,14000000
+Montmartre,617550903715823615,district,12000000
+Latin Quarter,891fb4671a3ffff,district,5000000
+Arc de Triomphe,891fb475a27ffff,monument,1800000
+Pantheon,617550903898013695,monument,900000
+Sacre-Coeur,891fb4666b3ffff,basilica,11000000
+Invalid cell,not-a-valid-h3,test,0

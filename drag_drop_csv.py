@@ -14,6 +14,14 @@ from qgis.core import (
 )
 from qgis.gui import QgsLayerTreeView
 from .csv_settings_dialog import CsvSettingsDialog
+from .h3_utils import (
+    H3_CRS,
+    get_h3_install_message,
+    h3_cell_to_qgs_geometry,
+    is_h3_available,
+    is_valid_h3_cell,
+    parse_h3_cell,
+)
 from urllib.parse import quote
 
 # Debug flag - set to True to enable debug printing
@@ -603,6 +611,146 @@ class DragDropCsv(QObject):
 
         return created_layers
 
+    def process_h3_geometries(self, file_path, delimiter, encoding, h3_col, base_layer_name):
+        """Process H3 cell ids and create a polygon memory layer."""
+        debug_print("Processing H3 geometries...")
+
+        if not is_h3_available():
+            raise Exception(get_h3_install_message())
+
+        features = []
+        field_data = {}
+        field_names = []
+
+        with open(file_path, 'r', encoding=encoding) as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            field_names = list(reader.fieldnames or [])
+
+            for field_name in field_names:
+                field_data[field_name] = []
+
+            for row in reader:
+                if not row:
+                    continue
+                row_lower = {(k or '').lower(): v for k, v in row.items()}
+                for field_name in field_names:
+                    val = row.get(field_name)
+                    if val is None:
+                        val = row_lower.get((field_name or '').lower())
+                    field_data[field_name].append(val)
+
+        h3_col_norm = (h3_col or '').strip().strip("'\"").lower()
+
+        with open(file_path, 'r', encoding=encoding) as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+
+            for row in reader:
+                if not row:
+                    continue
+
+                row_lower = {(k or '').lower(): v for k, v in row.items()}
+                raw_h3 = row.get(h3_col)
+                if raw_h3 is None:
+                    raw_h3 = row_lower.get(h3_col_norm)
+                if raw_h3 is None or str(raw_h3).strip() == '':
+                    continue
+
+                cell = parse_h3_cell(raw_h3)
+                if not is_valid_h3_cell(cell):
+                    debug_print(f"Skipping invalid H3 cell: {raw_h3}")
+                    continue
+
+                geometry = h3_cell_to_qgs_geometry(cell)
+                if not geometry or geometry.isNull():
+                    debug_print(f"Skipping H3 cell with empty geometry: {raw_h3}")
+                    continue
+
+                feature = QgsFeature()
+                attrs = []
+                for field_name in field_names:
+                    val = row.get(field_name)
+                    if val is None:
+                        val = row_lower.get((field_name or '').lower())
+                    attrs.append(val)
+                feature.setAttributes(attrs)
+                feature.setGeometry(geometry)
+                features.append(feature)
+
+        if not features:
+            raise Exception("No valid H3 cells found in the selected column")
+
+        source_crs = QgsCoordinateReferenceSystem(H3_CRS)
+        project_crs = self.project.crs()
+        target_authid = H3_CRS
+
+        if project_crs.isValid() and source_crs.isValid() and project_crs != source_crs:
+            try:
+                transformer = QgsCoordinateTransform(source_crs, project_crs, self.project)
+                for feature in features:
+                    geom = feature.geometry()
+                    if geom and not geom.isNull():
+                        geom.transform(transformer)
+                        feature.setGeometry(geom)
+                target_authid = project_crs.authid()
+            except Exception as transform_error:
+                debug_print(f"H3 CRS transform failed, keeping WGS84: {transform_error}")
+
+        memory_layer = QgsVectorLayer(
+            f"Polygon?crs={target_authid}",
+            base_layer_name,
+            "memory"
+        )
+        if not memory_layer.isValid():
+            raise Exception(f"Failed to create H3 layer: {memory_layer.error().message()}")
+
+        fields = QgsFields()
+        for field_name in field_names:
+            field_type = detect_field_type(field_data[field_name])
+            fields.append(QgsField(field_name, field_type))
+
+        provider = memory_layer.dataProvider()
+        provider.addAttributes(fields)
+        memory_layer.updateFields()
+
+        layer_fields = memory_layer.fields()
+        prepared_features = []
+        for feature in features:
+            feature.setFields(layer_fields, initAttributes=False)
+            attrs = feature.attributes()
+            if len(attrs) != layer_fields.count():
+                padded = list(attrs)[: layer_fields.count()]
+                if len(padded) < layer_fields.count():
+                    padded.extend([None] * (layer_fields.count() - len(padded)))
+                feature.setAttributes(padded)
+            prepared_features.append(feature)
+
+        provider.addFeatures(prepared_features)
+        memory_layer.updateExtents()
+        self.project.addMapLayer(memory_layer)
+
+        debug_print(f"Created H3 layer {base_layer_name} with {len(features)} features")
+        return [memory_layer]
+
+    def _zoom_to_layers(self, layers):
+        """Zoom map canvas to the combined extent of the given layers."""
+        combined_extent = None
+        for layer in layers:
+            if layer.wkbType() != QgsWkbTypes.NoGeometry:
+                if combined_extent is None:
+                    combined_extent = layer.extent()
+                else:
+                    combined_extent.combineExtentWith(layer.extent())
+
+        if not combined_extent:
+            return
+
+        canvas_crs = self.canvas.mapSettings().destinationCrs()
+        if canvas_crs != layers[0].crs():
+            transform = QgsCoordinateTransform(layers[0].crs(), canvas_crs, self.project)
+            combined_extent = transform.transformBoundingBox(combined_extent)
+        self.canvas.setExtent(combined_extent)
+        self.canvas.refresh()
+
     def process_csv(self, file_path):
         """Process a regular CSV file"""
         debug_print(f"Starting to process CSV file: {file_path}")
@@ -613,7 +761,8 @@ class DragDropCsv(QObject):
             
             # Show settings dialog
             debug_print("Opening settings dialog...")
-            dialog = CsvSettingsDialog(self.iface.mainWindow())
+            h3_available = is_h3_available()
+            dialog = CsvSettingsDialog(self.iface.mainWindow(), h3_available=h3_available)
             
             # Load previous settings if available
             last_settings = self.load_settings()
@@ -660,8 +809,17 @@ class DragDropCsv(QObject):
             # Load previous settings if available
             last_settings = self.load_settings()
             if last_settings:
-                dialog.geometry_combo.setCurrentText(last_settings.get('geometry_type', 'No geometry'))
-                dialog.set_crs(last_settings.get('crs', 'EPSG:4326'))
+                saved_geometry_type = last_settings.get('geometry_type', 'No geometry')
+                if "H3" in saved_geometry_type and not h3_available:
+                    QMessageBox.information(
+                        self.iface.mainWindow(),
+                        "H3 package not installed",
+                        get_h3_install_message(),
+                    )
+                    saved_geometry_type = 'No geometry'
+                dialog.geometry_combo.setCurrentText(saved_geometry_type)
+                if "H3" not in saved_geometry_type:
+                    dialog.set_crs(last_settings.get('crs', 'EPSG:4326'))
             
             if not dialog.exec_():
                 debug_print("User canceled the operation")
@@ -699,7 +857,6 @@ class DragDropCsv(QObject):
             layer_name = os.path.splitext(os.path.basename(file_path))[0]
             
             if "WKT" in geometry_type:
-                # Process WKT geometries and create separate layers
                 created_layers = self.process_wkt_geometries(
                     file_path,
                     delimiter,
@@ -708,26 +865,18 @@ class DragDropCsv(QObject):
                     crs,
                     layer_name
                 )
-                
                 if created_layers:
-                    # Zoom to the extent of all created layers
-                    combined_extent = None
-                    for layer in created_layers:
-                        if layer.wkbType() != QgsWkbTypes.NoGeometry:
-                            if combined_extent is None:
-                                combined_extent = layer.extent()
-                            else:
-                                combined_extent.combineExtentWith(layer.extent())
-                    
-                    if combined_extent:
-                        # Transform the extent to the canvas CRS
-                        canvas_crs = self.canvas.mapSettings().destinationCrs()
-                        if canvas_crs != created_layers[0].crs():
-                            transform = QgsCoordinateTransform(created_layers[0].crs(), canvas_crs, self.project)
-                            combined_extent = transform.transformBoundingBox(combined_extent)
-                        # Set the canvas extent
-                        self.canvas.setExtent(combined_extent)
-                        self.canvas.refresh()
+                    self._zoom_to_layers(created_layers)
+            elif "H3" in geometry_type:
+                created_layers = self.process_h3_geometries(
+                    file_path,
+                    delimiter,
+                    encoding,
+                    dialog.get_h3_column(),
+                    layer_name,
+                )
+                if created_layers:
+                    self._zoom_to_layers(created_layers)
             else:
                 # Create URI with proper path handling
                 uri = self.create_layer_uri(
