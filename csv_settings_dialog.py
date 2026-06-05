@@ -100,7 +100,7 @@ class CsvSettingsDialog(QDialog):
         self.delimiter_combo.currentTextChanged.connect(self.on_delimiter_changed)
         
         # Buttons
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
@@ -188,7 +188,7 @@ class CsvSettingsDialog(QDialog):
         dlg = QgsProjectionSelectionDialog(self)
         if getattr(self, 'selected_crs', None) and self.selected_crs.isValid():
             dlg.setCrs(self.selected_crs)
-        if dlg.exec_():
+        if dlg.exec():
             chosen = dlg.crs()
             if chosen and chosen.isValid():
                 self.selected_crs = chosen

@@ -5,8 +5,7 @@ import csv
 import re
 import time
 import json
-import chardet
-from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings, QVariant
+from qgis.PyQt.QtCore import QMimeData, Qt, QObject, QSettings, QVariant, QEvent
 from qgis.PyQt.QtWidgets import QMessageBox, QCheckBox
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsWkbTypes, QgsCoordinateReferenceSystem,
@@ -166,7 +165,7 @@ class DragDropCsv(QObject):
         
     def eventFilter(self, obj, event):
         """Handle drag and drop events"""
-        if event.type() == event.Drop:
+        if event.type() == QEvent.Type.Drop:
             # Check if the drop is on the main window or layer tree view
             if obj == self.main_window:
                 return self.handle_main_window_drop(event)
@@ -228,34 +227,49 @@ class DragDropCsv(QObject):
                         return False
         return False
         
+    def _try_common_encodings(self, file_path):
+        """Try a list of common encodings and return the first that works."""
+        common_encodings = ['utf-8', 'windows-1251', 'cp1251', 'ascii', 'iso-8859-1']
+        for encoding in common_encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    f.readline()
+                debug_print(f"Successfully tested with {encoding}")
+                return encoding
+            except UnicodeDecodeError:
+                continue
+        return None
+
     def detect_encoding(self, file_path):
-        """Try to detect file encoding using chardet"""
+        """Try to detect file encoding using chardet when available."""
         debug_print("Detecting file encoding...")
         try:
-            # Read a sample of the file for detection
-            with open(file_path, 'rb') as f:
-                raw_data = f.read(10000)  # Read first 10KB for detection
-            
-            # Detect encoding
-            result = chardet.detect(raw_data)
-            detected_encoding = result['encoding']
-            confidence = result['confidence']
-            
-            debug_print(f"Detected encoding: {detected_encoding} with confidence: {confidence}")
-            
-            # If confidence is low, try some common encodings
+            detected_encoding = None
+            confidence = 0.0
+
+            # chardet is optional; QGIS does not ship it by default
+            try:
+                import chardet
+
+                with open(file_path, 'rb') as f:
+                    raw_data = f.read(10000)  # Read first 10KB for detection
+
+                result = chardet.detect(raw_data)
+                detected_encoding = result.get('encoding')
+                confidence = result.get('confidence') or 0.0
+                debug_print(
+                    f"Detected encoding: {detected_encoding} with confidence: {confidence}"
+                )
+            except ImportError:
+                debug_print("chardet not installed, trying common encodings...")
+
+            # If confidence is low or chardet is missing, try common encodings
             if confidence < 0.7:
                 debug_print("Low confidence in detection, trying common encodings...")
-                common_encodings = ['utf-8', 'windows-1251', 'cp1251', 'ascii', 'iso-8859-1']
-                for encoding in common_encodings:
-                    try:
-                        with open(file_path, 'r', encoding=encoding) as f:
-                            f.readline()
-                        debug_print(f"Successfully tested with {encoding}")
-                        return encoding
-                    except UnicodeDecodeError:
-                        continue
-            
+                common_match = self._try_common_encodings(file_path)
+                if common_match:
+                    return common_match
+
             # If we have a detected encoding, verify it works
             if detected_encoding:
                 try:
@@ -264,11 +278,11 @@ class DragDropCsv(QObject):
                     return detected_encoding
                 except UnicodeDecodeError:
                     debug_print(f"Detected encoding {detected_encoding} failed verification")
-            
+
             # Fallback to utf-8 if all else fails
             debug_print("Using fallback encoding: utf-8")
             return 'utf-8'
-            
+
         except Exception as e:
             debug_print(f"Error during encoding detection: {str(e)}")
             return 'utf-8'  # Default to UTF-8 if detection fails
@@ -735,7 +749,7 @@ class DragDropCsv(QObject):
         """Zoom map canvas to the combined extent of the given layers."""
         combined_extent = None
         for layer in layers:
-            if layer.wkbType() != QgsWkbTypes.NoGeometry:
+            if layer.wkbType() != QgsWkbTypes.Type.NoGeometry:
                 if combined_extent is None:
                     combined_extent = layer.extent()
                 else:
@@ -821,7 +835,7 @@ class DragDropCsv(QObject):
                 if "H3" not in saved_geometry_type:
                     dialog.set_crs(last_settings.get('crs', 'EPSG:4326'))
             
-            if not dialog.exec_():
+            if not dialog.exec():
                 debug_print("User canceled the operation")
                 return  # User canceled
             
@@ -906,7 +920,7 @@ class DragDropCsv(QObject):
                 self.project.addMapLayer(memory_layer)
                 
                 # Zoom to layer extent if it has geometry
-                if memory_layer.wkbType() != QgsWkbTypes.NoGeometry:
+                if memory_layer.wkbType() != QgsWkbTypes.Type.NoGeometry:
                     debug_print("Zooming to layer extent...")
                     # Get the layer's extent in its source CRS
                     layer_extent = memory_layer.extent()
